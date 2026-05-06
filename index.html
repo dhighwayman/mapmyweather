@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MapMyWeather</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #edf1f7;
+      --surface:   rgba(255, 255, 255, 0.92);
+      --border:    rgba(0, 80, 160, 0.12);
+      --border-hi: rgba(0, 120, 200, 0.35);
+      --cyan:      #0088cc;
+      --cyan-glow: rgba(0, 136, 204, 0.14);
+      --amber:     #d97700;
+      --text:      #1a2d42;
+      --muted:     #8aa0b8;
+      --ui:        'Syne', sans-serif;
+      --mono:      'JetBrains Mono', monospace;
+      --bar-h:     86px;
+    }
+
+    html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--ui); }
+
+    /* ── LOADING ── */
+    #loading {
+      position: fixed; inset: 0; z-index: 9999;
+      background: var(--bg);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+      transition: opacity 0.7s ease, visibility 0.7s ease;
+    }
+    #loading.out { opacity: 0; visibility: hidden; }
+
+    .load-wordmark {
+      font-size: 34px; font-weight: 800; letter-spacing: -1.5px; line-height: 1;
+      background: linear-gradient(135deg, var(--cyan) 0%, #60efff 50%, var(--amber) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+
+    .load-sub { font-family: var(--mono); font-size: 10px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; }
+
+    .load-track { width: 200px; height: 2px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .load-fill {
+      height: 100%; width: 55%;
+      background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+      animation: sweep 1.5s ease-in-out infinite;
+    }
+    @keyframes sweep { 0% { transform: translateX(-120%); } 100% { transform: translateX(300%); } }
+
+    #load-msg { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+    /* ── TOP BAR ── */
+    #bar {
+      position: fixed; top: 0; left: 0; right: 0; height: var(--bar-h); z-index: 1000;
+      display: flex; align-items: center; gap: 16px; padding: 0 18px;
+      background: var(--surface);
+      backdrop-filter: blur(28px) saturate(160%);
+      -webkit-backdrop-filter: blur(28px) saturate(160%);
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 3px 40px rgba(0,0,0,0.6), 0 1px 0 rgba(0,200,255,0.06);
+    }
+
+    #logo {
+      flex-shrink: 0; line-height: 1;
+      font-size: 14px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+    }
+    #logo .c { color: var(--cyan); }
+    #logo .a { color: var(--amber); }
+
+    .vsep { flex-shrink: 0; width: 1px; height: 36px; background: var(--border); }
+
+    /* Play button */
+    #play-btn {
+      flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%;
+      background: var(--cyan-glow); border: 1px solid var(--border-hi);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      color: var(--cyan); font-size: 11px; user-select: none;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    #play-btn:hover { background: rgba(0,212,255,0.28); box-shadow: 0 0 12px var(--cyan-glow); }
+    #play-btn.on { background: rgba(0,212,255,0.22); box-shadow: 0 0 16px var(--cyan-glow); }
+
+    /* ── TIMELINE ── */
+    #tl-outer {
+      flex: 1; min-width: 0; position: relative; height: 100%;
+      overflow: hidden;
+    }
+
+    /* Fade edges */
+    #tl-outer::before, #tl-outer::after {
+      content: ''; position: absolute; top: 0; bottom: 0; width: 56px; z-index: 10; pointer-events: none;
+    }
+    #tl-outer::before { left: 0; background: linear-gradient(to right, var(--surface) 40%, transparent); }
+    #tl-outer::after  { right: 0; background: linear-gradient(to left, var(--surface) 40%, transparent); }
+
+    #tl-scroll {
+      overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+      cursor: grab; user-select: none; height: 100%;
+    }
+    #tl-scroll:active { cursor: grabbing; }
+    #tl-scroll::-webkit-scrollbar { display: none; }
+
+    #tl-track {
+      position: relative; height: 100%; flex-shrink: 0;
+      display: flex; align-items: center;
+    }
+
+    #tl-baseline {
+      position: absolute; top: 50%; left: 0; right: 0; height: 1px;
+      background: linear-gradient(to right, transparent, var(--border) 4%, var(--border) 96%, transparent);
+      pointer-events: none;
+    }
+
+    .day-label {
+      position: absolute; top: 8px;
+      font-size: 8px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase;
+      color: var(--muted); white-space: nowrap; pointer-events: none;
+    }
+
+    .tick {
+      position: absolute; top: 0; bottom: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      transform: translateX(-50%); cursor: pointer;
+      gap: 2px;
+    }
+
+    .tick-line {
+      width: 1px; background: var(--border);
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .tick.major .tick-line { background: rgba(0,200,255,0.22); }
+    .tick.past .tick-line  { opacity: 0.35; }
+    .tick.past .tick-lbl   { opacity: 0.35; }
+    .tick:hover .tick-line { background: rgba(0,212,255,0.6); }
+
+    .tick-lbl {
+      font-family: var(--mono); font-size: 8.5px; color: var(--muted);
+      white-space: nowrap; transition: color 0.15s;
+      margin-top: 2px;
+    }
+    .tick:hover .tick-lbl { color: var(--text); }
+
+    .tick.sel .tick-line { background: var(--cyan) !important; opacity: 1 !important; }
+    .tick.sel .tick-lbl  { color: var(--cyan) !important; opacity: 1 !important; }
+
+    /* Glowing cursor needle */
+    #needle {
+      position: absolute; top: 8px; bottom: 8px; width: 2px;
+      background: var(--cyan);
+      box-shadow: 0 0 6px rgba(0,136,204,0.5);
+      border-radius: 2px; pointer-events: none; z-index: 20;
+      transition: left 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    }
+    #needle::before {
+      content: ''; position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--cyan); box-shadow: 0 0 6px rgba(0,136,204,0.4);
+    }
+    #needle-pill {
+      position: absolute; top: -1px; left: 7px;
+      background: var(--cyan); color: #fff;
+      font-family: var(--mono); font-size: 8.5px; font-weight: 500;
+      padding: 2px 8px; border-radius: 100px; white-space: nowrap;
+      box-shadow: 0 2px 6px rgba(0,136,204,0.3);
+    }
+
+    /* ── MAP ── */
+    #map { position: fixed; left: 0; right: 0; top: var(--bar-h); bottom: 0; }
+    /* Ocultar atribución de Leaflet (CartoDB la incluye en tiles) */
+    .leaflet-control-attribution { font-size: 8px !important; opacity: 0.5; }
+
+    /* ── WEATHER MARKERS ── */
+    .wx {
+      position: absolute;
+      display: flex; flex-direction: column; align-items: center;
+      transform: translate(-50%, -100%); transform-origin: bottom center;
+      pointer-events: all; cursor: pointer;
+      transition: transform 0.15s;
+    }
+    .wx:hover { transform: translate(-50%, -100%) scale(1.1); }
+
+    .wx-bubble {
+      display: flex; align-items: center; gap: 5px;
+      padding: 5px 10px 5px 7px;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      box-shadow: 0 2px 12px rgba(0,60,120,0.15), 0 1px 3px rgba(0,0,0,0.08);
+      white-space: nowrap;
+      animation: popIn 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    }
+    @keyframes popIn {
+      from { opacity: 0; transform: scale(0.4) translateY(8px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .wx-icon { font-size: 17px; line-height: 1; }
+    .wx-data { display: flex; flex-direction: column; gap: 1px; line-height: 1; }
+    .wx-temp   { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+    .wx-name   { font-size: 7.5px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted); }
+    .wx-precip { font-family: var(--mono); font-size: 8px; color: #0077bb; letter-spacing: 0.2px; }
+
+    .wx-stem { width: 1px; height: 6px; background: linear-gradient(to bottom, rgba(0,100,180,0.3), transparent); }
+    .wx-dot  { width: 5px; height: 5px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 4px rgba(0,136,204,0.5); }
+
+    /* ── BOTTOM BADGE ── */
+    #badge {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 500;
+      font-family: var(--mono); font-size: 11.5px; color: var(--text);
+      background: rgba(255,255,255,0.92); border: 1px solid var(--border);
+      padding: 7px 20px; border-radius: 100px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 2px 16px rgba(0,60,120,0.12);
+      white-space: nowrap;
+    }
+
+    #credit {
+      position: fixed; bottom: 18px; right: 14px; z-index: 500;
+      font-family: var(--mono); font-size: 9px; color: var(--muted); opacity: 0.65;
+    }
+
+    #fetch-indicator {
+      position: fixed; top: calc(var(--bar-h) + 10px); right: 14px; z-index: 500;
+      font-family: var(--mono); font-size: 9px; color: var(--cyan);
+      background: rgba(4,11,22,0.85); border: 1px solid var(--border);
+      padding: 4px 10px; border-radius: 100px;
+      opacity: 0; transition: opacity 0.3s;
+      pointer-events: none;
+    }
+
+    /* ── DRAWER ── */
+    /* ── SEARCH ── */
+    #search-box {
+      position: fixed;
+      top: calc(var(--bar-h) + 12px); left: 12px;
+      z-index: 1000; width: 290px;
+    }
+    #search-inner {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,0.97);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border); border-radius: 12px;
+      padding: 0 12px;
+      box-shadow: 0 2px 16px rgba(0,60,120,0.12);
+      transition: box-shadow 0.2s;
+    }
+    #search-inner:focus-within {
+      box-shadow: 0 2px 20px rgba(0,100,200,0.18);
+      border-color: var(--border-hi);
+    }
+    #search-icon { font-size: 13px; color: var(--muted); flex-shrink: 0; user-select: none; }
+    #search-input {
+      flex: 1; border: none; background: none; outline: none;
+      font-family: var(--ui); font-size: 13px; color: var(--text);
+      padding: 10px 0;
+    }
+    #search-input::placeholder { color: var(--muted); }
+    #search-clear {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: 12px; padding: 2px 4px;
+      border-radius: 50%; display: none; line-height: 1;
+      transition: color 0.15s;
+    }
+    #search-clear:hover { color: var(--text); }
+    #search-results {
+      display: none; margin-top: 5px;
+      background: rgba(255,255,255,0.98);
+      border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,60,120,0.13);
+      overflow: hidden;
+    }
+    .search-result {
+      padding: 10px 14px; cursor: pointer;
+      border-bottom: 1px solid rgba(0,80,160,0.07);
+      transition: background 0.12s;
+    }
+    .search-result:last-child { border-bottom: none; }
+    .search-result:hover, .search-result.active { background: rgba(0,80,160,0.06); }
+    .search-result-name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .search-result-sub  { font-size: 10px; color: var(--muted); margin-top: 2px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ── DRAWER ── */
+    #drawer {
+      position: fixed; top: var(--bar-h); right: 0; bottom: 0;
+      width: 340px;
+      background: rgba(255,255,255,0.96);
+      backdrop-filter: blur(20px);
+      border-left: 1px solid var(--border);
+      box-shadow: -6px 0 40px rgba(0,60,120,0.1);
+      z-index: 900;
+      display: flex; flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+      overflow: hidden;
+    }
+    #drawer.open { transform: translateX(0); }
+
+    #drawer-header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      padding: 16px 18px 14px; border-bottom: 1px solid var(--border);
+      flex-shrink: 0; gap: 10px;
+    }
+    #drawer-coords {
+      font-family: var(--mono); font-size: 9px; color: var(--muted);
+      margin-bottom: 4px; letter-spacing: 0.3px;
+    }
+    #drawer-location {
+      font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.2;
+    }
+    #drawer-close {
+      flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      cursor: pointer; font-size: 12px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s, color 0.15s;
+    }
+    #drawer-close:hover { background: rgba(0,80,160,0.08); color: var(--text); }
+
+    #drawer-days { overflow-y: auto; flex: 1; }
+
+    .day-card { border-bottom: 1px solid var(--border); }
+
+    .day-card-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 11px 18px; cursor: pointer; user-select: none;
+      transition: background 0.15s;
+    }
+    .day-card-header:hover { background: rgba(0,80,160,0.04); }
+
+    .day-name { flex-shrink: 0; width: 82px; }
+    .day-name-main { font-size: 12px; font-weight: 700; color: var(--text); }
+    .day-name-sub  { font-family: var(--mono); font-size: 9px; color: var(--muted); margin-top: 1px; }
+
+    .day-icon { font-size: 20px; flex-shrink: 0; }
+
+    .day-temps { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; width: 38px; }
+    .day-temp-max { font-family: var(--mono); font-size: 12px; font-weight: 600; color: #c04800; }
+    .day-temp-min { font-family: var(--mono); font-size: 11px; color: #0066bb; }
+
+    .day-precip {
+      flex: 1; font-family: var(--mono); font-size: 9.5px;
+      color: #0077bb; text-align: right;
+    }
+    .day-chevron {
+      flex-shrink: 0; font-size: 9px; color: var(--muted);
+      transition: transform 0.2s; width: 14px; text-align: center;
+    }
+    .day-card.expanded .day-chevron { transform: rotate(90deg); }
+
+    .day-hours { display: none; background: rgba(0,60,140,0.03); }
+    .day-card.expanded .day-hours { display: block; }
+
+    .hour-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 18px 6px 30px;
+      border-bottom: 1px solid rgba(0,80,160,0.05);
+    }
+    .hour-row:last-child { border-bottom: none; }
+    .hour-time { font-family: var(--mono); font-size: 10px; color: var(--muted); width: 40px; flex-shrink: 0; }
+    .hour-icon { font-size: 14px; flex-shrink: 0; }
+    .hour-temp { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--text); width: 34px; }
+    .hour-precip { font-family: var(--mono); font-size: 9.5px; color: #0077bb; flex: 1; }
+
+    #drawer-loading {
+      padding: 32px 18px; font-family: var(--mono); font-size: 11px;
+      color: var(--muted); text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Loading screen ── -->
+<div id="loading">
+  <div class="load-wordmark">MapMyWeather</div>
+  <div class="load-sub">Live Forecast Explorer</div>
+  <div class="load-track"><div class="load-fill"></div></div>
+  <div id="load-msg">Connecting to forecast API…</div>
+  <button onclick="document.getElementById('loading').classList.add('out')" style="margin-top:8px;background:none;border:1px solid #2e5470;color:#2e5470;font-family:inherit;font-size:10px;padding:5px 14px;border-radius:100px;cursor:pointer;letter-spacing:1px">SALTAR</button>
+</div>
+
+<!-- ── Top bar ── -->
+<div id="bar">
+  <div id="logo"><span class="c">Map</span><span class="a">My</span>Weather</div>
+  <div class="vsep"></div>
+  <div id="play-btn" title="Play/pause forecast animation">▶</div>
+  <div id="tl-outer">
+    <div id="tl-scroll">
+      <div id="tl-track">
+        <div id="tl-baseline"></div>
+        <div id="needle"><div id="needle-pill">00:00</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Map ── -->
+<div id="map"></div>
+
+<!-- ── Search ── -->
+<div id="search-box">
+  <div id="search-inner">
+    <span id="search-icon">⌕</span>
+    <input id="search-input" type="text" placeholder="Buscar lugar…" autocomplete="off" spellcheck="false">
+    <button id="search-clear" title="Limpiar">✕</button>
+  </div>
+  <div id="search-results"></div>
+</div>
+
+<!-- ── Forecast drawer ── -->
+<div id="drawer">
+  <div id="drawer-header">
+    <div>
+      <div id="drawer-coords"></div>
+      <div id="drawer-location">—</div>
+    </div>
+    <button id="drawer-close">✕</button>
+  </div>
+  <div id="drawer-days"><div id="drawer-loading">Selecciona un punto en el mapa</div></div>
+</div>
+
+<div id="badge">—</div>
+<div id="fetch-indicator">⟳ cargando ciudades…</div>
+<div id="credit">Weather: Open-Meteo · Map: © OpenStreetMap · © CARTO</div>
+
+<script>
+'use strict';
+
+// Sin API key — Leaflet + CartoDB Dark Matter es completamente gratuito
+
+const MARK_STEP     = 3;    // horas entre marcas del timeline
+const MARK_PX       = 54;   // píxeles por marca
+const FORECAST_DAYS = 5;
+const IDLE_DEBOUNCE = 1100; // ms tras el último movimiento del mapa
+const MAX_CITIES    = 12;   // marcadores máximos en pantalla
+
+// ── Helpers ──
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const cacheKey = (lat, lng) => `${(+lat).toFixed(3)},${(+lng).toFixed(3)}`;
+
+// ── WMO weather codes ──
+function wxInfo(code) {
+  if (code === 0)                   return { icon: '☀️',  col: '#ffd60a' };
+  if (code === 1)                   return { icon: '🌤️', col: '#ffbe00' };
+  if (code === 2)                   return { icon: '⛅',  col: '#8ab8d8' };
+  if (code === 3)                   return { icon: '☁️',  col: '#6a8fa8' };
+  if ([45,48].includes(code))       return { icon: '🌫️', col: '#7a9ab0' };
+  if ([51,53,55].includes(code))    return { icon: '🌦️', col: '#4a90d9' };
+  if ([61,63,65].includes(code))    return { icon: '🌧️', col: '#2e78c8' };
+  if ([71,73,75,77].includes(code)) return { icon: '❄️',  col: '#90d0f0' };
+  if ([80,81,82].includes(code))    return { icon: '🌦️', col: '#4080d0' };
+  if ([85,86].includes(code))       return { icon: '🌨️', col: '#80b8e8' };
+  if ([95,96,99].includes(code))    return { icon: '⛈️',  col: '#8855cc' };
+  return { icon: '🌡️', col: '#668888' };
+}
+function tempCol(t) {
+  if (t == null) return '#668888';
+  if (t <= 0)  return '#7cc8e4';
+  if (t <= 10) return '#98c8f0';
+  if (t <= 20) return '#f0d870';
+  if (t <= 30) return '#f49040';
+  return '#ee4820';
+}
+
+// ── Genera el array de horas UTC sin esperar a la API ──
+function generateTimes() {
+  const times = [];
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  for (let h = 0; h < (FORECAST_DAYS + 1) * 24; h++) {
+    const t = new Date(start.getTime() + h * 3600000);
+    times.push(t.toISOString().slice(0, 16));
+  }
+  return times;
+}
+
+// ── State ──
+let lmap      = null;   // instancia Leaflet
+let hourIdx   = 0;
+let allTimes     = generateTimes();
+const wxCache    = {};                // cacheKey → { name, temps, codes }
+const activeMarkers = new Map();      // cacheKey → WxMarker
+let playing   = false;
+let playTimer = null;
+let idleTimer = null;
+
+// marks del timeline
+let markEls  = [];
+let markIdxs = [];
+
+// ── Snap al hora actual ──
+(function initHourIdx() {
+  const nowMs = Date.now();
+  hourIdx = allTimes.reduce((best, t, i) => {
+    const d = Math.abs(new Date(t + 'Z').getTime() - nowMs);
+    return d < Math.abs(new Date(allTimes[best] + 'Z').getTime() - nowMs) ? i : best;
+  }, 0);
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  TIMELINE — se construye al cargar, sin esperar datos
+// ═══════════════════════════════════════════════════════════════
+function buildTimeline() {
+  const track  = $('tl-track');
+  const scroll = $('tl-scroll');
+  const slots  = Math.ceil(FORECAST_DAYS * 24 / MARK_STEP);
+  markEls = []; markIdxs = [];
+  track.style.width = (slots * MARK_PX + MARK_PX) + 'px';
+
+  const nowMs = Date.now();
+  let lastDay = null;
+
+  for (let si = 0; si < slots; si++) {
+    const hi = si * MARK_STEP;
+    if (hi >= allTimes.length) break;
+    const t = new Date(allTimes[hi] + 'Z');
+    const x = si * MARK_PX + MARK_PX / 2;
+
+    const dayKey = `${t.getUTCFullYear()}-${t.getUTCMonth()}-${t.getUTCDate()}`;
+    if (dayKey !== lastDay) {
+      lastDay = dayKey;
+      const dl = document.createElement('div');
+      dl.className = 'day-label'; dl.style.left = x + 'px';
+      const nowDate = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
+      const diff    = Math.round((new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate())) - nowDate) / 86400000);
+      dl.textContent = diff === 0 ? 'TODAY' : diff === 1 ? 'TOMORROW'
+        : t.toLocaleDateString('en', { weekday: 'long', timeZone: 'UTC' }).toUpperCase();
+      track.appendChild(dl);
+    }
+
+    const h = t.getUTCHours();
+    const tick = document.createElement('div');
+    tick.className = 'tick' + ([0,6,12,18].includes(h) ? ' major' : '') + (t.getTime() < nowMs ? ' past' : '');
+    tick.style.left = x + 'px';
+
+    const line = document.createElement('div');
+    line.className = 'tick-line';
+    line.style.height = ([0,6,12,18].includes(h) ? 18 : 11) + 'px';
+
+    const lbl = document.createElement('div');
+    lbl.className = 'tick-lbl';
+    lbl.textContent = h.toString().padStart(2,'0') + ':00';
+
+    tick.appendChild(line); tick.appendChild(lbl); track.appendChild(tick);
+    markEls.push(tick); markIdxs.push(hi);
+    tick.addEventListener('click', () => { if (!dragMoved) selectHour(hi); });
+  }
+
+  moveCursor();
+
+  const mi    = markIdxs.findIndex(h => h >= hourIdx);
+  const initX = (mi >= 0 ? mi : 0) * MARK_PX + MARK_PX / 2;
+  scroll.scrollLeft = initX - scroll.clientWidth * 0.35;
+
+  let pointerDown = false, dragMoved = false, dragStartX = 0, dragScrollL = 0;
+  scroll.addEventListener('mousedown', e => { pointerDown = true; dragMoved = false; dragStartX = e.pageX; dragScrollL = scroll.scrollLeft; });
+  window.addEventListener('mousemove', e => { if (!pointerDown) return; if (Math.abs(e.pageX - dragStartX) > 5) dragMoved = true; scroll.scrollLeft = dragScrollL - (e.pageX - dragStartX); });
+  window.addEventListener('mouseup', () => { pointerDown = false; });
+  track.addEventListener('click', e => {
+    if (dragMoved || e.target.closest('.tick')) return;
+    const x  = e.clientX - track.getBoundingClientRect().left + scroll.scrollLeft;
+    const s  = Math.max(0, Math.min(markIdxs.length-1, Math.round((x - MARK_PX/2) / MARK_PX)));
+    selectHour(markIdxs[s]);
+  });
+  scroll.addEventListener('touchstart', e => { dragStartX = e.touches[0].pageX; dragScrollL = scroll.scrollLeft; }, { passive: true });
+  scroll.addEventListener('touchmove',  e => { scroll.scrollLeft = dragScrollL - (e.touches[0].pageX - dragStartX); }, { passive: true });
+}
+
+function moveCursor() {
+  const needle = $('needle'), pill = $('needle-pill'), scroll = $('tl-scroll');
+  const mi = markIdxs.reduce((best, h, i) => Math.abs(h-hourIdx) < Math.abs(markIdxs[best]-hourIdx) ? i : best, 0);
+  const x  = mi * MARK_PX + MARK_PX / 2;
+  needle.style.left = x + 'px';
+  markEls.forEach((el, i) => el.classList.toggle('sel', i === mi));
+  const t    = new Date((allTimes[hourIdx] || allTimes[0]) + 'Z');
+  const hStr = t.getUTCHours().toString().padStart(2,'0') + ':00';
+  pill.textContent = hStr;
+  $('badge').textContent = t.toLocaleDateString('en', { weekday:'short', month:'short', day:'numeric', timeZone:'UTC' }) + ' · ' + hStr + ' UTC';
+  const viewX = x - scroll.scrollLeft, w = scroll.clientWidth;
+  if (viewX < 80 || viewX > w - 80) scroll.scrollTo({ left: x - w * 0.38, behavior: 'smooth' });
+}
+
+function selectHour(hi) {
+  hourIdx = Math.max(0, Math.min(allTimes.length - 1, hi));
+  moveCursor();
+  updateMarkers();
+}
+
+// ── Play button ──
+$('play-btn').addEventListener('click', () => {
+  playing = !playing;
+  const btn = $('play-btn');
+  if (playing) {
+    btn.textContent = '⏸'; btn.classList.add('on');
+    playTimer = setInterval(() => selectHour(hourIdx + MARK_STEP >= FORECAST_DAYS * 24 ? 0 : hourIdx + MARK_STEP), 700);
+  } else {
+    btn.textContent = '▶'; btn.classList.remove('on');
+    clearInterval(playTimer);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  DATASET LOCAL — ciudades del viewport (sin red, sin rate limits)
+// ═══════════════════════════════════════════════════════════════
+let allCities = [];   // cargado una vez al inicio
+
+async function loadCitiesDataset() {
+  try {
+    const r = await fetch('./cities.json');
+    allCities = await r.json();
+  } catch(e) { console.error('Error loading cities.json:', e); }
+}
+
+// Zoom < OVERPASS_ZOOM → dataset local (ciudades grandes, instantáneo)
+// Zoom >= OVERPASS_ZOOM → Overpass (pueblos pequeños, bounding box pequeño = sin 429)
+const OVERPASS_ZOOM = 10;
+
+function maxCitiesForZoom(zoom) {
+  if (zoom <= 4) return { max: 6,  minPop: 2000000 };
+  if (zoom <= 6) return { max: 10, minPop: 500000  };
+  if (zoom <= 8) return { max: 12, minPop: 100000  };
+  return               { max: 12, minPop: 50000   };
+}
+
+// Dataset local: ciudades importantes por bounding box
+function citiesFromDataset(bounds) {
+  const zoom = lmap.getZoom();
+  const ne = bounds.getNorthEast(), sw = bounds.getSouthWest();
+  const { max, minPop } = maxCitiesForZoom(zoom);
+  return allCities
+    .filter(c =>
+      c.lat >= sw.lat && c.lat <= ne.lat &&
+      c.lng >= sw.lng && c.lng <= ne.lng &&
+      (c.p || 0) >= minPop
+    )
+    .sort((a, b) => (b.p || 0) - (a.p || 0))
+    .slice(0, max)
+    .map(c => ({ name: c.n, lat: c.lat, lng: c.lng, key: cacheKey(c.lat, c.lng) }));
+}
+
+// Overpass: pueblos y ciudades pequeñas cuando el mapa está muy ampliado
+let _overpassCtrl = null;
+async function citiesFromOverpass(bounds) {
+  const ne = bounds.getNorthEast(), sw = bounds.getSouthWest();
+  const zoom = lmap.getZoom();
+  const placeFilter = zoom >= 13
+    ? '"place"~"^(city|town|village|hamlet)$"'
+    : '"place"~"^(city|town|village)$"';
+  const maxRows = zoom >= 13 ? 20 : 15;
+
+  const query = `[out:json][timeout:10];node[${placeFilter}]["name"](${sw.lat},${sw.lng},${ne.lat},${ne.lng});out ${maxRows};`;
+
+  if (_overpassCtrl) _overpassCtrl.abort();
+  _overpassCtrl = new AbortController();
+
+  try {
+    const res  = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST', body: query, signal: _overpassCtrl.signal,
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.elements
+      .filter(e => e.tags?.name)
+      .sort((a, b) => {
+        const ord = { city:0, town:1, village:2, hamlet:3 };
+        const pa = ord[a.tags.place] ?? 4, pb = ord[b.tags.place] ?? 4;
+        if (pa !== pb) return pa - pb;
+        return (parseInt(b.tags.population) || 0) - (parseInt(a.tags.population) || 0);
+      })
+      .slice(0, maxRows)
+      .map(e => ({ name: e.tags['name:en'] || e.tags.name, lat: e.lat, lng: e.lon, key: cacheKey(e.lat, e.lon) }));
+  } catch(e) {
+    if (e.name !== 'AbortError') console.warn('Overpass:', e.message);
+    return [];
+  }
+}
+
+async function fetchCitiesInBounds(bounds) {
+  const zoom = lmap.getZoom();
+  if (zoom < 3) return [];
+  if (zoom < OVERPASS_ZOOM) return citiesFromDataset(bounds);
+  return await citiesFromOverpass(bounds);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  OPEN-METEO — clima para una ciudad (con caché)
+// ═══════════════════════════════════════════════════════════════
+async function fetchCityWeather(city) {
+  if (wxCache[city.key]) return;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lng}&hourly=temperature_2m,weathercode,precipitation_probability,precipitation&timezone=UTC&forecast_days=${FORECAST_DAYS + 1}`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(url);
+      if (r.status === 429) { await sleep(1500 * (attempt + 1)); continue; }
+      if (!r.ok) { console.warn(`Open-Meteo ${r.status} for ${city.name}`); return; }
+      const d = await r.json();
+      if (!d.hourly) { console.warn('No hourly data for', city.name, d); return; }
+      wxCache[city.key] = {
+        name:   city.name,
+        temps:  d.hourly.temperature_2m,
+        codes:  d.hourly.weathercode,
+        prob:   d.hourly.precipitation_probability,
+        precip: d.hourly.precipitation,
+      };
+      return;
+    } catch(e) { console.error('fetch error for', city.name, e); return; }
+  }
+  console.warn('All retries failed for', city.name);
+}
+
+async function loadWeatherForCities(cities) {
+  const needed = cities.filter(c => !wxCache[c.key]);
+  console.log(`Weather needed for ${needed.length}/${cities.length} cities:`, needed.map(c => c.name));
+  if (!needed.length) return;
+  for (let i = 0; i < needed.length; i += 4) {
+    await Promise.all(needed.slice(i, i + 4).map(fetchCityWeather));
+    if (i + 4 < needed.length) await sleep(400);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MARCADORES — clase simple con Leaflet DivIcon
+// ═══════════════════════════════════════════════════════════════
+class WxMarker {
+  constructor(lat, lng, city) {
+    this.city  = city;
+    this._data = null;
+    this._hi   = null;
+    this.el    = null;
+
+    this._lmarker = L.marker([lat, lng], {
+      icon: L.divIcon({
+        className: '',
+        html: `<div class="wx">
+          <div class="wx-bubble">
+            <span class="wx-icon">⋯</span>
+            <div class="wx-data">
+              <span class="wx-temp">—°</span>
+              <span class="wx-name">${city}</span>
+              <span class="wx-precip"></span>
+            </div>
+          </div>
+          <div class="wx-stem"></div>
+          <div class="wx-dot"></div>
+        </div>`,
+        iconSize:   [0, 0],
+        iconAnchor: [0, 0],
+      }),
+      interactive: false,
+    });
+  }
+
+  addTo(map) {
+    this._lmarker.addTo(map);
+    this.el = this._lmarker.getElement()?.querySelector('.wx') ?? null;
+    if (this._data !== null && this.el) this._render(this._data, this._hi);
+    return this;
+  }
+
+  remove() { this._lmarker.remove(); }
+
+  update(data, hi) {
+    this._data = data;
+    this._hi   = hi;
+    if (this.el) this._render(data, hi);
+  }
+
+  _render(data, hi) {
+    const code   = data.codes?.[hi]  ?? 0;
+    const temp   = data.temps?.[hi]  ?? null;
+    const prob   = data.prob?.[hi]   ?? null;
+    const precip = data.precip?.[hi] ?? null;
+
+    const info = wxInfo(code);
+    this.el.querySelector('.wx-icon').textContent = info.icon;
+
+    const tempEl = this.el.querySelector('.wx-temp');
+    tempEl.textContent = temp != null ? Math.round(temp) + '°' : '—°';
+    tempEl.style.color = tempCol(temp);
+
+    const precipEl = this.el.querySelector('.wx-precip');
+    if (prob != null && prob > 0) {
+      precipEl.textContent = `💧 ${prob}%` + (precip > 0 ? ` ${precip.toFixed(1)}mm` : '');
+      precipEl.style.display = '';
+    } else {
+      precipEl.style.display = 'none';
+    }
+
+    const bubble = this.el.querySelector('.wx-bubble');
+    bubble.style.borderColor = info.col + '38';
+    bubble.style.animation = 'none'; void bubble.offsetWidth; bubble.style.animation = '';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MARKERS — sincroniza marcadores con la lista de ciudades actual
+// ═══════════════════════════════════════════════════════════════
+function syncMarkers(cities) {
+  const newKeys = new Set(cities.map(c => c.key));
+  for (const [key, marker] of activeMarkers) {
+    if (!newKeys.has(key)) { marker.remove(); activeMarkers.delete(key); }
+  }
+  for (const city of cities) {
+    if (activeMarkers.has(city.key) || !wxCache[city.key]) continue;
+    const m = new WxMarker(city.lat, city.lng, city.name).addTo(lmap);
+    m.update(wxCache[city.key], hourIdx);
+    activeMarkers.set(city.key, m);
+  }
+}
+
+function updateMarkers() {
+  for (const [key, marker] of activeMarkers) {
+    const d = wxCache[key];
+    if (d) marker.update(d, hourIdx);
+  }
+}
+
+function setFetchIndicator(on) {
+  $('fetch-indicator').style.opacity = on ? '1' : '0';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MAP MOVE — se dispara al parar de mover/zoom el mapa
+// ═══════════════════════════════════════════════════════════════
+async function onMapMove() {
+  clearTimeout(idleTimer);
+  const debounce = lmap.getZoom() >= OVERPASS_ZOOM ? 1800 : IDLE_DEBOUNCE;
+  idleTimer = setTimeout(async () => {
+    try {
+      if (!allCities.length && lmap.getZoom() < OVERPASS_ZOOM) return;
+      const bounds = lmap.getBounds();
+      const cities = await fetchCitiesInBounds(bounds);
+      if (!cities.length) return;
+      setFetchIndicator(true);
+      await loadWeatherForCities(cities);
+      syncMarkers(cities);
+      setFetchIndicator(false);
+    } catch(e) {
+      console.error('onMapMove error:', e);
+      setFetchIndicator(false);
+    }
+  }, IDLE_DEBOUNCE);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LEAFLET — inicialización del mapa
+// ═══════════════════════════════════════════════════════════════
+function initLeaflet() {
+  lmap = L.map('map', { zoomControl: false, center: [47.5, 7], zoom: 5 });
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    subdomains: 'abcd',
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap &copy; CARTO',
+  }).addTo(lmap);
+
+  L.control.zoom({ position: 'bottomright' }).addTo(lmap);
+
+  lmap.on('moveend zoomend', onMapMove);
+  lmap.on('click', onMapClick);
+
+  $('loading').style.display = 'none';
+
+  // Geolocalización
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      pos => { lmap.setView([pos.coords.latitude, pos.coords.longitude], 7); },
+      ()  => { onMapMove(); }   // fallback: cargar con vista por defecto
+    );
+  } else {
+    onMapMove();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SEARCH — buscador de localizaciones con Nominatim
+// ═══════════════════════════════════════════════════════════════
+let _searchTimer  = null;
+let _searchActive = -1;   // índice de resultado seleccionado con teclado
+let _searchData   = [];   // últimos resultados
+
+const searchInput   = $('search-input');
+const searchResults = $('search-results');
+const searchClear   = $('search-clear');
+
+searchInput.addEventListener('input', e => {
+  const q = e.target.value.trim();
+  searchClear.style.display = q ? 'block' : 'none';
+  _searchActive = -1;
+  clearTimeout(_searchTimer);
+  if (q.length < 2) { hideSearchResults(); return; }
+  _searchTimer = setTimeout(() => doSearch(q), 320);
+});
+
+searchInput.addEventListener('keydown', e => {
+  const items = searchResults.querySelectorAll('.search-result');
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    _searchActive = Math.min(_searchActive + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle('active', i === _searchActive));
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _searchActive = Math.max(_searchActive - 1, 0);
+    items.forEach((el, i) => el.classList.toggle('active', i === _searchActive));
+  } else if (e.key === 'Enter') {
+    if (_searchActive >= 0 && _searchData[_searchActive]) selectSearchResult(_searchData[_searchActive]);
+    else if (_searchData[0]) selectSearchResult(_searchData[0]);
+  } else if (e.key === 'Escape') {
+    hideSearchResults();
+    searchInput.blur();
+  }
+});
+
+searchClear.addEventListener('click', () => {
+  searchInput.value = '';
+  searchClear.style.display = 'none';
+  hideSearchResults();
+  searchInput.focus();
+});
+
+document.addEventListener('click', e => {
+  if (!$('search-box').contains(e.target)) hideSearchResults();
+});
+
+async function doSearch(q) {
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=6&addressdetails=1`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    _searchData = await r.json();
+    renderSearchResults(_searchData);
+  } catch { hideSearchResults(); }
+}
+
+function renderSearchResults(results) {
+  searchResults.innerHTML = '';
+  if (!results.length) { searchResults.style.display = 'none'; return; }
+
+  results.forEach((r, idx) => {
+    const parts = r.display_name.split(',');
+    const name  = parts[0].trim();
+    const sub   = parts.slice(1, 4).join(',').trim();
+
+    const item = document.createElement('div');
+    item.className = 'search-result';
+    item.innerHTML = `<div class="search-result-name">${name}</div><div class="search-result-sub">${sub}</div>`;
+    item.addEventListener('mousedown', e => { e.preventDefault(); selectSearchResult(r); });
+    searchResults.appendChild(item);
+  });
+
+  searchResults.style.display = 'block';
+}
+
+function hideSearchResults() {
+  searchResults.style.display = 'none';
+  _searchActive = -1;
+}
+
+function selectSearchResult(result) {
+  const lat = parseFloat(result.lat);
+  const lng  = parseFloat(result.lon);
+  const name = result.display_name.split(',')[0].trim();
+
+  searchInput.value = name;
+  searchClear.style.display = 'block';
+  hideSearchResults();
+
+  // Zoom al lugar y abrir drawer
+  const zoom = result.type === 'city' || result.type === 'administrative' ? 11 : 13;
+  lmap.setView([lat, lng], zoom);
+  onMapClick({ latlng: L.latLng(lat, lng) });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DRAWER — forecast detallado al hacer click en el mapa
+// ═══════════════════════════════════════════════════════════════
+let _clickMarker = null;
+
+function openDrawer()  { $('drawer').classList.add('open'); }
+function closeDrawer() {
+  $('drawer').classList.remove('open');
+  if (_clickMarker) { _clickMarker.remove(); _clickMarker = null; }
+}
+$('drawer-close').addEventListener('click', closeDrawer);
+
+async function onMapClick(e) {
+  const { lat, lng } = e.latlng;
+
+  // Marcador temporal en el punto clicado
+  if (_clickMarker) _clickMarker.remove();
+  _clickMarker = L.circleMarker([lat, lng], {
+    radius: 7, color: '#0088cc', fillColor: '#fff',
+    fillOpacity: 1, weight: 2.5,
+  }).addTo(lmap);
+
+  $('drawer-coords').textContent = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  $('drawer-location').textContent = '…';
+  $('drawer-days').innerHTML = '<div id="drawer-loading">Cargando previsión…</div>';
+  openDrawer();
+
+  const [forecast, placeName] = await Promise.all([
+    fetchPointForecast(lat, lng),
+    reverseGeocode(lat, lng),
+  ]);
+
+  $('drawer-location').textContent = placeName;
+  if (forecast) renderDrawerDays(forecast);
+  else $('drawer-days').innerHTML = '<div id="drawer-loading">Error al cargar los datos</div>';
+}
+
+async function fetchPointForecast(lat, lng) {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast`
+      + `?latitude=${lat}&longitude=${lng}`
+      + `&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max`
+      + `&hourly=temperature_2m,weathercode,precipitation_probability,precipitation`
+      + `&timezone=auto&forecast_days=${FORECAST_DAYS}`;
+    const r = await fetch(url);
+    return await r.json();
+  } catch { return null; }
+}
+
+async function reverseGeocode(lat, lng) {
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=12`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    const d = await r.json();
+    const a = d.address || {};
+    return a.city || a.town || a.village || a.hamlet || a.county || d.display_name?.split(',')[0] || `${lat.toFixed(3)}, ${lng.toFixed(3)}`;
+  } catch {
+    return `${lat.toFixed(3)}, ${lng.toFixed(3)}`;
+  }
+}
+
+function renderDrawerDays(data) {
+  const container = $('drawer-days');
+  container.innerHTML = '';
+
+  const days   = data.daily.time;
+  const maxT   = data.daily.temperature_2m_max;
+  const minT   = data.daily.temperature_2m_min;
+  const codes  = data.daily.weathercode;
+  const prec   = data.daily.precipitation_sum;
+  const prob   = data.daily.precipitation_probability_max;
+
+  const hTimes = data.hourly.time;
+  const hTemps = data.hourly.temperature_2m;
+  const hCodes = data.hourly.weathercode;
+  const hProb  = data.hourly.precipitation_probability;
+  const hPrec  = data.hourly.precipitation;
+
+  const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+
+  days.forEach((day, di) => {
+    const date     = new Date(day + 'T12:00:00');
+    const isToday  = day === todayStr;
+    const dayLabel = isToday ? 'Today' : date.toLocaleDateString('en', { weekday: 'long' });
+    const dateLbl  = date.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+    const info     = wxInfo(codes[di] ?? 0);
+
+    const precipStr = (prob[di] ?? 0) > 0
+      ? `💧 ${prob[di]}%` + ((prec[di] ?? 0) > 0 ? ` · ${prec[di].toFixed(1)}mm` : '')
+      : '';
+
+    const card = document.createElement('div');
+    card.className = 'day-card';
+    card.innerHTML = `
+      <div class="day-card-header">
+        <div class="day-name">
+          <div class="day-name-main">${dayLabel}</div>
+          <div class="day-name-sub">${dateLbl}</div>
+        </div>
+        <span class="day-icon">${info.icon}</span>
+        <div class="day-temps">
+          <span class="day-temp-max">${maxT[di] != null ? Math.round(maxT[di]) + '°' : '—'}</span>
+          <span class="day-temp-min">${minT[di] != null ? Math.round(minT[di]) + '°' : '—'}</span>
+        </div>
+        <span class="day-precip">${precipStr}</span>
+        <span class="day-chevron">▶</span>
+      </div>
+      <div class="day-hours"></div>`;
+
+    // Horas cada 3h para este día
+    const hoursEl = card.querySelector('.day-hours');
+    hTimes
+      .map((t, i) => ({ t, i }))
+      .filter(({ t }) => t.startsWith(day) && parseInt(t.slice(11, 13)) % 3 === 0)
+      .forEach(({ t, i }) => {
+        const hInfo  = wxInfo(hCodes[i] ?? 0);
+        const hp     = hProb[i] ?? 0;
+        const hv     = hPrec[i] ?? 0;
+        const hpStr  = hp > 0 ? `💧 ${hp}%${hv > 0 ? ' · ' + hv.toFixed(1) + 'mm' : ''}` : '';
+        const row    = document.createElement('div');
+        row.className = 'hour-row';
+        row.innerHTML = `
+          <span class="hour-time">${t.slice(11, 16)}</span>
+          <span class="hour-icon">${hInfo.icon}</span>
+          <span class="hour-temp">${hTemps[i] != null ? Math.round(hTemps[i]) + '°' : '—'}</span>
+          <span class="hour-precip">${hpStr}</span>`;
+        hoursEl.appendChild(row);
+      });
+
+    card.querySelector('.day-card-header').addEventListener('click', () => {
+      card.classList.toggle('expanded');
+    });
+
+    container.appendChild(card);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BOOTSTRAP
+// ═══════════════════════════════════════════════════════════════
+buildTimeline();
+loadCitiesDataset();
+initLeaflet();
+</script>
+</body>
+</html>
