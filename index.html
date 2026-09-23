@@ -468,7 +468,11 @@
 <script>
 'use strict';
 
-// Sin API key — Leaflet + CartoDB Dark Matter es completamente gratuito
+// CARTO exige API key en sus tiles desde agosto de 2026: sin ella los sirve
+// marcados con un "API KEY REQUIRED" encima del mapa. Es pública por diseño
+// — sitio estático, no hay dónde esconderla — y está restringida por dominio.
+// Se pide gratis en https://carto.com/basemaps/apikey
+const CARTO_KEY = 'cb1_3unc_1_8e8c5c8de4c1d9b0766c899e';
 
 const MARK_STEP     = 3;    // horas entre marcas del timeline
 const MARK_PX       = 54;   // píxeles por marca
@@ -891,7 +895,7 @@ async function onMapMove() {
 function initLeaflet() {
   lmap = L.map('map', { zoomControl: false, center: [47.5, 7], zoom: 5 });
 
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+  L.tileLayer(`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`, {
     subdomains: 'abcd',
     maxZoom: 19,
     attribution: '&copy; OpenStreetMap &copy; CARTO',
